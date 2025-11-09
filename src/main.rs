@@ -79,16 +79,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Spawn a task to handle file system events
     tokio::spawn(async move {
-        while let Some(event) = rx.recv().await {
-            use notify::EventKind;
-            match event.kind {
-                EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_) => {
+        let mut debounce_timer: Option<tokio::time::Instant> = None;
+        let debounce_duration = std::time::Duration::from_secs(1);
+        
+        loop {
+            tokio::select! {
+                // Wait for events from the file watcher
+                Some(event) = rx.recv() => {
+                    use notify::EventKind;
+                    match event.kind {
+                        EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_) => {
+                            info!("File system event: {:?}, scheduling table reload", event);
+                            // Reset the debounce timer
+                            debounce_timer = Some(tokio::time::Instant::now() + debounce_duration);
+                        }
+                        _ => {}
+                    }
+                }
+                // Wait for debounce timer to expire
+                _ = async {
+                    if let Some(deadline) = debounce_timer {
+                        tokio::time::sleep_until(deadline).await
+                    } else {
+                        // Sleep indefinitely if no timer is set
+                        std::future::pending::<()>().await
+                    }
+                }, if debounce_timer.is_some() => {
+                    // Timer expired, process the update
                     info!("ELF directory changed, reloading tables...");
                     let new_tables = parse_elf_dir(&elf_dir).await;
                     *tables_clone.write().await = new_tables;
                     info!("Tables reloaded");
+                    debounce_timer = None;
                 }
-                _ => {}
             }
         }
     });
@@ -364,7 +387,7 @@ async fn handle_protocol_v1(
                 }
                 Err(DecodeError::UnexpectedEof) => break,
                 Err(e) => {
-                    info!("Failed to decode defmt frame: {}", e);
+                    info!("Failed to decode defmt frame: {}, data: {:?}", e, &chunk[..n]);
                     // continue decoding
                 }
             };
