@@ -81,7 +81,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::spawn(async move {
         let mut debounce_timer: Option<tokio::time::Instant> = None;
         let debounce_duration = std::time::Duration::from_secs(1);
-        
+
         loop {
             tokio::select! {
                 // Wait for events from the file watcher
@@ -89,7 +89,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     use notify::EventKind;
                     match event.kind {
                         EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_) => {
-                            info!("File system event: {:?}, scheduling table reload", event);
+                            // info!("File system event: {:?}, scheduling table reload", event);
                             // Reset the debounce timer
                             debounce_timer = Some(tokio::time::Instant::now() + debounce_duration);
                         }
@@ -387,7 +387,11 @@ async fn handle_protocol_v1(
                 }
                 Err(DecodeError::UnexpectedEof) => break,
                 Err(e) => {
-                    info!("Failed to decode defmt frame: {}, data: {:?}", e, &chunk[..n]);
+                    info!(
+                        "Failed to decode defmt frame: {}, data: {:?}",
+                        e,
+                        &chunk[..n]
+                    );
                     // continue decoding
                 }
             };
