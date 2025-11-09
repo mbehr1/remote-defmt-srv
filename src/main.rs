@@ -1,16 +1,12 @@
 use clap::Parser;
 use defmt_decoder::{DecodeError, Table};
+use defmt_parser::Level;
 use notify::{Event, RecursiveMode, Watcher};
 use socket2::TcpKeepalive;
-use std::path::PathBuf;
-use std::sync::Arc;
-use tokio::net::TcpListener;
-use tokio::sync::RwLock;
-use tokio::{fs, io::AsyncReadExt};
-use tracing::{info, warn};
-use tracing_subscriber::Layer;
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::util::SubscriberInitExt;
+use std::{path::PathBuf, sync::Arc};
+use tokio::{fs, io::AsyncReadExt, net::TcpListener, sync::RwLock};
+use tracing::{debug, error, info, trace, warn};
+use tracing_subscriber::{Layer, layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -369,6 +365,7 @@ async fn handle_protocol_v1(
     drop(tables_guard);
 
     let mut stream_decoder = table.2.new_stream_decoder();
+    let encoder_can_recover = table.2.encoding().can_recover();
 
     // read from socket in 256 byte chunks until EOF and decode defmt frames
     let mut chunk = [0u8; 256];
@@ -381,10 +378,26 @@ async fn handle_protocol_v1(
         // info!("Read {} bytes", n);
         stream_decoder.received(&chunk[..n]);
         loop {
+            // todo log frame timestamp? display_timestamp returns an option...
             match stream_decoder.decode() {
-                Ok(frame) => {
-                    tracing::info!(target: "frames", "{}", frame.display(false));
-                }
+                Ok(frame) => match frame.level() {
+                    Some(Level::Trace) => {
+                        trace!(target: "frames", "{}", frame.display_message())
+                    }
+                    Some(Level::Debug) => {
+                        debug!(target: "frames", "{}", frame.display_message())
+                    }
+                    Some(Level::Info) => {
+                        info!(target: "frames", "{}", frame.display_message())
+                    }
+                    Some(Level::Warn) => {
+                        warn!(target: "frames", "{}", frame.display_message())
+                    }
+                    Some(Level::Error) => {
+                        error!(target: "frames", "{}", frame.display_message())
+                    }
+                    None => info!(target: "frames", "{}", frame.display_message()),
+                },
                 Err(DecodeError::UnexpectedEof) => break,
                 Err(e) => {
                     info!(
@@ -392,11 +405,12 @@ async fn handle_protocol_v1(
                         e,
                         &chunk[..n]
                     );
-                    // continue decoding
+                    if !encoder_can_recover {
+                        break;
+                    }
                 }
             };
         }
     }
-
     Ok(())
 }
