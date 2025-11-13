@@ -1,5 +1,7 @@
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use clap::Parser;
 use notify::{Event, RecursiveMode, Watcher};
+use serde::Deserialize;
 use std::{path::PathBuf, sync::Arc};
 use tokio::{net::TcpListener, sync::RwLock};
 use tracing::{info, warn};
@@ -20,11 +22,39 @@ struct Args {
     elf_dir: PathBuf,
 }
 
+#[derive(Deserialize, Debug, Default)]
+struct Config {
+    /// Loki endpoint URL (e.g., http://localhost:3100)
+    loki_url: Option<String>,
+    loki_user: Option<String>,
+    loki_password: Option<String>,
+}
+
+impl Config {
+    fn parse() -> Self {
+        std::fs::read_to_string("cfg.toml")
+            .ok()
+            .and_then(|content| toml::from_str(&content).ok())
+            .unwrap_or_default()
+    }
+}
+
+fn get_loki_auth(config: &Config) -> String {
+    let loki_user = config.loki_user.as_ref().unwrap().to_owned();
+    let loki_password = config.loki_password.as_ref().unwrap().to_owned();
+
+    let basic_auth = format!("{loki_user}:{loki_password}");
+    BASE64_STANDARD.encode(basic_auth.as_bytes())
+}
+
 type TableEntry = (String, PathBuf, Vec<u8>); // build-id, path, elf bytes
 type SharedTables = Arc<RwLock<Vec<TableEntry>>>;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args = Args::parse();
+    let config = Config::parse();
+
     // Create a filter for the frames target only
     /* let frame_filter = tracing_subscriber::filter::Targets::new()
         .with_target("frames", tracing::Level::ERROR); // TODO log this to file!
@@ -45,12 +75,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_writer(std::io::stdout)
         .with_filter(main_filter);
 
-    tracing_subscriber::registry()
-        .with(main_layer)
-        // .with(frame_layer)
-        .init();
+    let registry = tracing_subscriber::registry().with(main_layer);
+    // Add Loki layer if URL is provided
+    if let Some(loki_url) = &config.loki_url {
+        let (loki_layer, task) = tracing_loki::builder()
+            .label("service", "remote-defmt-srv_try1")?
+            .http_header("Authorization", format!("Basic {}", get_loki_auth(&config)))?
+            .build_url(loki_url.parse()?)?;
 
-    let args = Args::parse();
+        tokio::spawn(task);
+        registry.with(loki_layer).init();
+    } else {
+        registry.init();
+    }
 
     // parse files in elf_dir
     let tables = Arc::new(RwLock::new(parse_elf::parse_elf_dir(&args.elf_dir).await));

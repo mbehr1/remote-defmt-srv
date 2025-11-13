@@ -5,12 +5,16 @@ edition = "2024"
 keywords = ["cli", "embedded", "defmt", "esp32"]
 
 [dependencies]
+base64 = "0.22.1"
 clap = { version = "4.5.51", features = ["derive"] }
+serde = { version = "1.0.228", features = ["derive"] }
+toml = "0.8"
 defmt-decoder = "1.0.0"
 defmt-parser = "1.0.0"
 tokio = { version = "1.48.0", features = ["io-util", "net", "rt-multi-thread", "macros", "fs", "sync", "time"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-loki = "0.2.6"
 object = "0.36"
 hex = "0.4.3"
 notify = "8.2.0"
