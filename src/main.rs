@@ -20,6 +20,10 @@ struct Args {
     /// Directory containing ELF files
     #[arg(long)]
     elf_dir: PathBuf,
+
+    /// Optional value to use for loki 'service' label. Overwrites cfg.toml value if provided via arg.
+    #[arg(long)]
+    loki_label_service: Option<String>,
 }
 
 #[derive(Deserialize, Debug, Default)]
@@ -28,6 +32,7 @@ struct Config {
     loki_url: Option<String>,
     loki_user: Option<String>,
     loki_password: Option<String>,
+    loki_label_service: Option<String>,
 }
 
 impl Config {
@@ -78,8 +83,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let registry = tracing_subscriber::registry().with(main_layer);
     // Add Loki layer if URL is provided
     if let Some(loki_url) = &config.loki_url {
+        let loki_label_service = args
+            .loki_label_service
+            .as_ref()
+            .or(config.loki_label_service.as_ref())
+            .map(|s| s.as_str())
+            .unwrap_or("remote-defmt-srv_try1");
+
         let (loki_layer, task) = tracing_loki::builder()
-            .label("service", "remote-defmt-srv_try1")?
+            .label("service", loki_label_service)?
             .http_header("Authorization", format!("Basic {}", get_loki_auth(&config)))?
             .build_url(loki_url.parse()?)?;
 
