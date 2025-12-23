@@ -9,7 +9,7 @@ pub async fn parse_elf_dir(elf_dir: &PathBuf) -> Vec<(String, PathBuf, Vec<u8>)>
     if let Ok(mut entries) = tokio::fs::read_dir(elf_dir).await {
         // tokio::pin!(entries); ???
         while let Some(entry) = entries.next_entry().await.unwrap_or(None) {
-            let path = entry.path().canonicalize().unwrap();
+            let path = entry.path().canonicalize().unwrap_or_default();
             if path.is_dir() {
                 //warn!("Skipping directory {:?}", path);
                 continue;
